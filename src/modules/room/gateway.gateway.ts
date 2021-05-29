@@ -11,9 +11,15 @@ import { Server, Socket } from 'socket.io';
 
 export interface Room {
   roomid: string;
+  roomowner?: {
+    id: string;
+  };
   playing?: string;
   users: any[];
   playlist?: any;
+  musicowner?: {
+    id: string;
+  };
 }
 @WebSocketGateway()
 export class GatewayGateway {
@@ -44,44 +50,43 @@ export class GatewayGateway {
   @SubscribeMessage('createRoom')
   createRoom(client: Socket, payload: any): any {
     console.log(`MEU ROOM ID RECEBIDO`, payload);
-    client.join(payload.id, (socket) => {
-      console.log(socket);
-      console.log(client.rooms);
-      console.log(Object.values(client.rooms));
-      const createdRoom = Object.values(client.rooms)[1];
-      this.store.push({
-        roomid: createdRoom,
-        users: [client.client.id],
-      });
+    client.join(payload.id, () => {
+      const createdRoom = payload.id;
 
-      console.log(this.store);
-      // client.emit('createdRoom', createdRoom);
-      // console.log(createdRoom);
-      this.server.to(createdRoom).emit('createdRoom', 'connected');
-      this.server.to(createdRoom).emit('createdRoom', createdRoom);
-      this.server.to(createdRoom).emit('createdRoom', client.id);
-      // client.emit('createdRoom', createdRoom);
+      this.store.push({
+        roomid: payload.id,
+        users: [client.client.id],
+        musicowner: {
+          id: client.id,
+        },
+        roomowner: {
+          id: client.id,
+        },
+      });
+      const storedRoomd = this._getStoredRoomRef(payload.id);
+      // this.server.to(createdRoom).emit('createdRoom', 'connected');
+      this.server.to(createdRoom).emit('createdRoom', storedRoomd);
+      // this.server.to(createdRoom).emit('createdRoom', client.id);
     });
-    const createdRoom = Object.values(client.rooms)[1];
-    return createdRoom;
+    return payload.id;
   }
 
   @SubscribeMessage('connectRoom')
   connectRoom(client: Socket, payload: any): string {
+    console.log('1', this.store);
+
     client.join(payload.roomid, (event) => {
-      console.log(`conector`, event);
-      console.log(payload);
-      console.log(client.rooms);
-      console.log(this.store);
       const storedRoom = this.store.find(
         (room) => room.roomid == payload.roomid,
       );
+      console.log(this.store);
+
       if (storedRoom) {
         storedRoom.users.push(client.id);
       }
-      console.log(this.store);
       this.server.to(client.id).emit('connectedRoom', {
-        nowPlaying: storedRoom ? storedRoom.playing : null,
+        room: storedRoom ? storedRoom : null,
+        clientid: client.id,
       });
     });
 
@@ -96,18 +101,17 @@ export class GatewayGateway {
 
   @SubscribeMessage('loadVideo')
   loadVideo(client: Socket, payload: any): string {
-    console.log('laodVideo', payload);
     const storedRoom = this.store.find((room) => room.roomid == payload.roomid);
     if (storedRoom) {
       storedRoom.playing = payload.videourl;
     }
-    this.server.to(payload.roomid).emit('videoLoaded', payload.videourl);
+    storedRoom.musicowner.id = client.id;
+    this.server.to(payload.roomid).emit('videoLoaded', storedRoom);
     return 'Hello world!';
   }
 
   @SubscribeMessage('updateVideo')
   updateVideo(client: Socket, payload: any): string {
-    console.log(`recebi me upayload`, payload);
     if (payload.type !== 10) {
       this.server.to(payload.roomid).emit('videoUpdated', {
         type: payload.type,
@@ -120,5 +124,9 @@ export class GatewayGateway {
       });
     }
     return 'Hello world!';
+  }
+
+  _getStoredRoomRef(id) {
+    return this.store.find((room) => room.roomid == id);
   }
 }
