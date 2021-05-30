@@ -20,6 +20,9 @@ export interface Room {
   musicowner?: {
     id: string;
   };
+  nowPlaying?: {
+    currentTime: number;
+  };
 }
 @WebSocketGateway()
 export class GatewayGateway {
@@ -104,10 +107,13 @@ export class GatewayGateway {
     const storedRoom = this.store.find((room) => room.roomid == payload.roomid);
     if (storedRoom) {
       storedRoom.playing = payload.videourl;
+      storedRoom.musicowner = {
+        id: client.id,
+      };
+      storedRoom.nowPlaying = {
+        currentTime: 0,
+      };
     }
-    storedRoom.musicowner = {
-      id: client.id,
-    };
     this.server.to(payload.roomid).emit('videoLoaded', storedRoom);
     return 'Hello world!';
   }
@@ -120,6 +126,14 @@ export class GatewayGateway {
         currentTime: payload.currentTime,
       });
     } else {
+      const room = this._getStoredRoomRef(payload.roomid);
+      if (room.nowPlaying) {
+        room.nowPlaying.currentTime = payload.currentTime;
+      } else {
+        room.nowPlaying = {
+          currentTime: payload.currentTime,
+        };
+      }
       this.server.to(payload.roomid).emit('videoUpdated', {
         type: payload.type,
         currentTime: payload.currentTime,
