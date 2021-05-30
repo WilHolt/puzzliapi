@@ -105,7 +105,9 @@ export class GatewayGateway {
     if (storedRoom) {
       storedRoom.playing = payload.videourl;
     }
-    storedRoom.musicowner.id = client.id;
+    storedRoom.musicowner = {
+      id: client.id,
+    };
     this.server.to(payload.roomid).emit('videoLoaded', storedRoom);
     return 'Hello world!';
   }
