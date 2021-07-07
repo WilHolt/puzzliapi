@@ -44,7 +44,6 @@ const convertYouTubeDuration = function (yt_duration) {
   return moment.duration(yt_duration).format('h:mm:ss').padStart(4, '0:0');
 };
 
-
 import {
   ConnectedSocket,
   SubscribeMessage,
@@ -99,11 +98,24 @@ export class GatewayGateway {
 
   handleConnection(@ConnectedSocket() client: any, ...args: any[]) {
     this.logger.log(' Connected', client.id);
+
     // console.log(args);
   }
 
-  handleDisconnect(client: Socket) {
+  handleDisconnect(@ConnectedSocket() client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+    const index = this.store.findIndex((room) =>
+      room.users.some((user) => user.id == client.id),
+    );
+    const store = this.store[index];
+    const userIndex = store.users.findIndex((user) => user.id == client.id);
+    store.users = [
+      ...store.users.slice(0, userIndex),
+      ...store.users.slice(userIndex + 1),
+    ];
+    this.server.to(store.roomid).emit('userDisconnectedServer', store);
+
+    console.log(client.id, store.users);
   }
   @SubscribeMessage('message')
   handleMessage(client: Socket, payload: any): string {
@@ -141,14 +153,29 @@ export class GatewayGateway {
       const storedRoom = this.store.find(
         (room) => room.roomid == payload.roomid,
       );
-      console.log(this.store);
       if (storedRoom) {
-        storedRoom.users.push(client.id);
+        axios.get('http://names.drycodes.com/1').then((res) => {
+          const user = {
+            id: client.id,
+            nickname: res.data[0],
+          };
+          storedRoom.users.push(user);
+          console.log('rodou')
+          this.server.to(client.id).emit('connectedRoom', {
+            room: storedRoom ? storedRoom : null,
+            user,
+            clientid: client.id,
+          });
+
+          this.server.to(storedRoom.roomid).emit('connectedRoomServer', {
+            room: storedRoom ? storedRoom : null,
+            user,
+            clientid: client.id,
+          });
+        });
       }
-      this.server.to(client.id).emit('connectedRoom', {
-        room: storedRoom ? storedRoom : null,
-        clientid: client.id,
-      });
+
+      console.log(client.rooms)
     });
 
     return 'Hello world!';
@@ -196,8 +223,7 @@ export class GatewayGateway {
   }
 
   @SubscribeMessage('nextVideo')
-  nextVideo(client: Socket, payload: any){
-    console.log('nextVideo')
+  nextVideo(client: Socket, payload: any) {
     const storedRoom = this.store.find((room) => room.roomid == payload.roomid);
     if (storedRoom) {
       storedRoom.playing = payload.videourl;
