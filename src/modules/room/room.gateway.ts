@@ -160,7 +160,7 @@ export class GatewayGateway {
             nickname: res.data[0],
           };
           storedRoom.users.push(user);
-          console.log('rodou')
+          console.log('rodou');
           this.server.to(client.id).emit('connectedRoom', {
             room: storedRoom ? storedRoom : null,
             user,
@@ -174,8 +174,6 @@ export class GatewayGateway {
           });
         });
       }
-
-      console.log(client.rooms)
     });
 
     return 'Hello world!';
