@@ -166,7 +166,6 @@ export class GatewayGateway {
             user,
             clientid: client.id,
           });
-
           this.server.to(storedRoom.roomid).emit('connectedRoomServer', {
             room: storedRoom ? storedRoom : null,
             user,
