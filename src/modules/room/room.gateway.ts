@@ -104,18 +104,21 @@ export class GatewayGateway {
 
   handleDisconnect(@ConnectedSocket() client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
-    const index = this.store.findIndex((room) =>
-      room.users.some((user) => user.id == client.id),
+    const index = this.store.findIndex(
+      (room) =>
+        room && room.users && room.users.some((user) => user.id == client.id),
     );
     const store = this.store[index];
-    const userIndex = store.users.findIndex((user) => user.id == client.id);
-    store.users = [
-      ...store.users.slice(0, userIndex),
-      ...store.users.slice(userIndex + 1),
-    ];
-    this.server.to(store.roomid).emit('userDisconnectedServer', store);
+    if (store != undefined) {
+      const userIndex = store.users.findIndex((user) => user.id == client.id);
+      store.users = [
+        ...store.users.slice(0, userIndex),
+        ...store.users.slice(userIndex + 1),
+      ];
+      this.server.to(store.roomid).emit('userDisconnectedServer', store);
 
-    console.log(client.id, store.users);
+      console.log(client.id, store.users);
+    }
   }
   @SubscribeMessage('message')
   handleMessage(client: Socket, payload: any): string {
