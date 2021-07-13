@@ -75,6 +75,7 @@ export interface Room {
     id: string;
   };
   nowPlaying?: {
+    music?: Music;
     currentTime: number;
   };
 }
@@ -122,7 +123,6 @@ export class GatewayGateway {
   }
   @SubscribeMessage('message')
   handleMessage(client: Socket, payload: any): string {
-    // console.log(payload);
     return 'Hello world!';
   }
 
@@ -130,7 +130,6 @@ export class GatewayGateway {
   createRoom(client: Socket, payload: any): any {
     client.join(payload.id, () => {
       const createdRoom = payload.id;
-
       this.store.push({
         roomid: payload.id,
         users: [client.client.id],
@@ -196,6 +195,7 @@ export class GatewayGateway {
         id: client.id,
       };
       storedRoom.nowPlaying = {
+        music: payload.music,
         currentTime: 0,
       };
 
@@ -216,7 +216,13 @@ export class GatewayGateway {
     const storedRoom = this._getStoredRoomRef(payload.roomid);
     if (storedRoom) {
       const music = await getVideoDetails(payload.videoid);
-      storedRoom.playlist.push({ ...music, url: payload.videourl });
+      // eslint-disable-next-line prettier/prettier
+      if (storedRoom.playlist.length == 0 && (storedRoom.nowPlaying == undefined)) {
+        this.loadVideo(client, { ...payload, music });
+      } else {
+        storedRoom.playlist.push({ ...music, url: payload.videourl });
+      }
+
       this.server.to(payload.roomid).emit('videoQueued', storedRoom.playlist);
     }
     return 'Hello world!';
@@ -243,6 +249,19 @@ export class GatewayGateway {
       ];
     }
     this.server.to(payload.roomid).emit('videoLoaded', storedRoom);
+  }
+
+  @SubscribeMessage('changeVideoPosition')
+  changeVideoPosition(client: Socket, payload: any) {
+    console.log(payload);
+    console.log('ÇHANGE VIDEO POSITION', payload);
+    const storedRoom = this.store.find((room) => room.roomid == payload.roomid);
+    console.log(storedRoom);
+    if (storedRoom) {
+      console.log(storedRoom);
+      storedRoom.playlist = payload.playlist;
+    }
+    this.server.to(payload.roomid).emit('playlistChanged', storedRoom.playlist);
   }
 
   @SubscribeMessage('removeQueue')
