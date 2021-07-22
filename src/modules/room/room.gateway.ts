@@ -17,24 +17,24 @@ const youtube = google.youtube({
   auth: 'AIzaSyCao-rJjVRDwfmbK5z6YvS0yex3IdvldxE', // specify your API key here
 });
 
-function getVideoDetails(id) {
+function getVideoDetails(id, user) {
   let musicDetails;
+  console.log('user', user);
   return api
     .get(
       `https://www.googleapis.com/youtube/v3/videos?id=${id}&key=AIzaSyCao-rJjVRDwfmbK5z6YvS0yex3IdvldxE&part=id,snippet,contentDetails,localizations`,
     )
     .then((ev) => {
       const item = ev.data.items[0];
-      // console.log(
-      //   convertYouTubeDuration(ev.data.items[0].contentDetails.duration),
-      // );
       musicDetails = {
+        id: item.id,
         title: item.snippet.title,
         creator: item.snippet.channelTitle,
         duration: convertYouTubeDuration(
           ev.data.items[0].contentDetails.duration,
         ),
         thumbnail: item.snippet.thumbnails.high,
+        requester: user,
       };
       return musicDetails;
     });
@@ -54,6 +54,8 @@ import { Server, Socket } from 'socket.io';
 
 export interface Music {
   title: string;
+  id?: string;
+  videourl?: string;
   thumbnail: {
     url: string;
     width: number;
@@ -61,6 +63,7 @@ export interface Music {
   };
   channelTitle: string;
   url: string;
+  requester?: any;
 }
 
 export interface Room {
@@ -130,21 +133,28 @@ export class GatewayGateway {
   createRoom(client: Socket, payload: any): any {
     client.join(payload.id, () => {
       const createdRoom = payload.id;
-      this.store.push({
-        roomid: payload.id,
-        users: [client.client.id],
-        musicowner: {
+
+      axios.get('http://names.drycodes.com/1').then((res) => {
+        const user = {
           id: client.id,
-        },
-        roomowner: {
-          id: client.id,
-        },
-        playlist: [],
+          nickname: res.data[0],
+        };
+        this.store.push({
+          roomid: payload.id,
+          users: [user],
+          musicowner: {
+            id: client.id,
+          },
+          roomowner: {
+            id: client.id,
+          },
+          playlist: [],
+        });
+        const storedRoomd = this._getStoredRoomRef(payload.id);
+        // this.server.to(createdRoom).emit('createdRoom', 'connected');
+        this.server.to(createdRoom).emit('createdRoom', storedRoomd);
+        // this.server.to(createdRoom).emit('createdRoom', client.id);
       });
-      const storedRoomd = this._getStoredRoomRef(payload.id);
-      // this.server.to(createdRoom).emit('createdRoom', 'connected');
-      this.server.to(createdRoom).emit('createdRoom', storedRoomd);
-      // this.server.to(createdRoom).emit('createdRoom', client.id);
     });
     return payload.id;
   }
@@ -162,7 +172,6 @@ export class GatewayGateway {
             nickname: res.data[0],
           };
           storedRoom.users.push(user);
-          console.log('rodou');
           this.server.to(client.id).emit('connectedRoom', {
             room: storedRoom ? storedRoom : null,
             user,
@@ -198,14 +207,14 @@ export class GatewayGateway {
         music: payload.music,
         currentTime: 0,
       };
-
       const index = storedRoom.playlist.findIndex(
-        (music: Music) => music.url == payload.videourl,
+        (music: Music) => music.id == payload.music.id,
       );
       storedRoom.playlist = [
         ...storedRoom.playlist.slice(0, index),
         ...storedRoom.playlist.slice(index + 1),
       ];
+      console.log('LOADVIDEO', storedRoom)
     }
     this.server.to(payload.roomid).emit('videoLoaded', storedRoom);
     return 'Hello world!';
@@ -214,11 +223,13 @@ export class GatewayGateway {
   @SubscribeMessage('addQueue')
   async addQueue(client: Socket, payload: any) {
     const storedRoom = this._getStoredRoomRef(payload.roomid);
+    const user = this.store[0].users.find((user) => user.id == client.id);
     if (storedRoom) {
-      const music = await getVideoDetails(payload.videoid);
+      const music = await getVideoDetails(payload.videoid, user);
       // eslint-disable-next-line prettier/prettier
       if (storedRoom.playlist.length == 0 && (storedRoom.nowPlaying == undefined)) {
         this.loadVideo(client, { ...payload, music });
+        console.log('after first load', storedRoom)
       } else {
         storedRoom.playlist.push({ ...music, url: payload.videourl });
       }
@@ -253,12 +264,8 @@ export class GatewayGateway {
 
   @SubscribeMessage('changeVideoPosition')
   changeVideoPosition(client: Socket, payload: any) {
-    console.log(payload);
-    console.log('ÇHANGE VIDEO POSITION', payload);
     const storedRoom = this.store.find((room) => room.roomid == payload.roomid);
-    console.log(storedRoom);
     if (storedRoom) {
-      console.log(storedRoom);
       storedRoom.playlist = payload.playlist;
     }
     this.server.to(payload.roomid).emit('playlistChanged', storedRoom.playlist);
@@ -307,13 +314,22 @@ export class GatewayGateway {
 
   @SubscribeMessage('clearPlaylist')
   clearPlaylist(client: Socket, payload: any): any {
-    console.log('clear');
     const storedRoom = this.store.find((room) => room.roomid == payload.roomid);
     storedRoom.playlist = [];
     storedRoom.playing = '';
-    console.log('clear', storedRoom);
   }
 
+  @SubscribeMessage('skipVideo')
+  skipVideo(client: Socket, payload: any): any {
+    const storedRoom = this._getStoredRoomRef(payload.roomid);
+    if (storedRoom) {
+      console.log(payload, 'skipvideo');
+      this.loadVideo(client, {
+        roomid: payload.roomid,
+        music: storedRoom.playlist[0],
+      });
+    }
+  }
   _getStoredRoomRef(id) {
     return this.store.find((room) => room.roomid == id);
   }
