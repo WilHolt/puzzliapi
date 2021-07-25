@@ -19,7 +19,6 @@ const youtube = google.youtube({
 
 function getVideoDetails(id, user) {
   let musicDetails;
-  console.log('user', user);
   return api
     .get(
       `https://www.googleapis.com/youtube/v3/videos?id=${id}&key=AIzaSyCao-rJjVRDwfmbK5z6YvS0yex3IdvldxE&part=id,snippet,contentDetails,localizations`,
@@ -68,18 +67,14 @@ export interface Music {
 
 export interface Room {
   roomid: string;
-  roomowner?: {
-    id: string;
-  };
+  roomowner?: string;
   playing?: string;
   users: any[];
   playlist?: Music[];
-  musicowner?: {
-    id: string;
-  };
   nowPlaying?: {
     music?: Music;
-    currentTime: number;
+    timecode?: number;
+    lasttimecode?: number;
   };
 }
 
@@ -97,13 +92,10 @@ export class GatewayGateway {
 
   afterInit() {
     this.logger.log(' WebSocket Initialized');
-    // console.log(' WebSocket Initialized');
   }
 
   handleConnection(@ConnectedSocket() client: any, ...args: any[]) {
     this.logger.log(' Connected', client.id);
-
-    // console.log(args);
   }
 
   handleDisconnect(@ConnectedSocket() client: Socket) {
@@ -120,8 +112,6 @@ export class GatewayGateway {
         ...store.users.slice(userIndex + 1),
       ];
       this.server.to(store.roomid).emit('userDisconnectedServer', store);
-
-      console.log(client.id, store.users);
     }
   }
   @SubscribeMessage('message')
@@ -133,28 +123,28 @@ export class GatewayGateway {
   createRoom(client: Socket, payload: any): any {
     client.join(payload.id, () => {
       const createdRoom = payload.id;
+      // axios.get('http://names.drycodes.com/1').then((res) => {
+      const user = {
+        id: client.id,
+        nickname: 'res.data[0]',
 
-      axios.get('http://names.drycodes.com/1').then((res) => {
-        const user = {
-          id: client.id,
-          nickname: res.data[0],
-        };
-        this.store.push({
-          roomid: payload.id,
-          users: [user],
-          musicowner: {
-            id: client.id,
-          },
-          roomowner: {
-            id: client.id,
-          },
-          playlist: [],
-        });
-        const storedRoomd = this._getStoredRoomRef(payload.id);
-        // this.server.to(createdRoom).emit('createdRoom', 'connected');
-        this.server.to(createdRoom).emit('createdRoom', storedRoomd);
-        // this.server.to(createdRoom).emit('createdRoom', client.id);
+      };
+      // nickname: 'res.data[0]',
+
+      this.store.push({
+        roomid: payload.id,
+        users: [user],
+        roomowner: user.id,
+        playlist: [],
+        nowPlaying: {
+          lasttimecode: 0,
+        },
       });
+      const storedRoom = this._getStoredRoomRef(payload.id);
+      this.server
+        .to(storedRoom.roomid)
+        .emit('createdRoom', { room: storedRoom, user });
+      // });
     });
     return payload.id;
   }
@@ -166,32 +156,55 @@ export class GatewayGateway {
         (room) => room.roomid == payload.roomid,
       );
       if (storedRoom) {
-        axios.get('http://names.drycodes.com/1').then((res) => {
-          const user = {
-            id: client.id,
-            nickname: res.data[0],
-          };
-          storedRoom.users.push(user);
-          this.server.to(client.id).emit('connectedRoom', {
-            room: storedRoom ? storedRoom : null,
-            user,
-            clientid: client.id,
-          });
-          this.server.to(storedRoom.roomid).emit('connectedRoomServer', {
-            room: storedRoom ? storedRoom : null,
-            user,
-            clientid: client.id,
-          });
+        const user = {
+          id: client.id,
+          nickname: uuidv4(),
+        };
+
+        storedRoom.users.push(user);
+
+        this.server.to(user.id).emit('connectedRoom', {
+          room: storedRoom ? storedRoom : null,
+          user,
+        });
+
+        this.server.to(storedRoom.roomid).emit('connectedRoomServer', {
+          room: storedRoom ? storedRoom : null,
+          user,
         });
       }
     });
 
     return 'Hello world!';
   }
-
   @SubscribeMessage('updateVideoState')
-  observeVideoPlaying(client: Socket, payload: any): string {
-    this.server.emit('videoStateUpdated', payload.timecode);
+  observeVideoPlaying(
+    client: Socket,
+    payload: { roomid: string; timecode?: number; type?: number },
+  ): string {
+    const { timecode, roomid, type } = payload;
+    const storedRoom = this._getStoredRoomRef(roomid);
+    if (storedRoom) {
+      // console.log(
+      //   '----timecode: ',
+      //   timecode,
+      //   '----lasttimecode:',
+      //   storedRoom.nowPlaying.lasttimecode,
+      // );
+      console.log(payload);
+
+      const lasttimecode = storedRoom.nowPlaying.lasttimecode;
+      const isTimecodeAdvanced = timecode > lasttimecode;
+      const isTimecodeReturned = (timecode - lasttimecode) < 0;
+      const isPaused = type == 2;
+      if (isTimecodeAdvanced || isTimecodeReturned || isPaused) {
+        console.log(payload);
+        const event = { type, value: timecode };
+        this.server.to(payload.roomid).emit('videoStateUpdated', event);
+        storedRoom.nowPlaying.lasttimecode = timecode;
+      }
+    }
+
     return 'Hello world!';
   }
 
@@ -200,12 +213,10 @@ export class GatewayGateway {
     const storedRoom = this.store.find((room) => room.roomid == payload.roomid);
     if (storedRoom) {
       storedRoom.playing = payload.videourl;
-      storedRoom.musicowner = {
-        id: client.id,
-      };
       storedRoom.nowPlaying = {
         music: payload.music,
-        currentTime: 0,
+        timecode: 0,
+        lasttimecode: 0,
       };
       const index = storedRoom.playlist.findIndex(
         (music: Music) => music.id == payload.music.id,
@@ -214,7 +225,6 @@ export class GatewayGateway {
         ...storedRoom.playlist.slice(0, index),
         ...storedRoom.playlist.slice(index + 1),
       ];
-      console.log('LOADVIDEO', storedRoom)
     }
     this.server.to(payload.roomid).emit('videoLoaded', storedRoom);
     return 'Hello world!';
@@ -223,13 +233,12 @@ export class GatewayGateway {
   @SubscribeMessage('addQueue')
   async addQueue(client: Socket, payload: any) {
     const storedRoom = this._getStoredRoomRef(payload.roomid);
-    const user = this.store[0].users.find((user) => user.id == client.id);
     if (storedRoom) {
+      const user = storedRoom.users.find((user) => user.id == client.id);
       const music = await getVideoDetails(payload.videoid, user);
       // eslint-disable-next-line prettier/prettier
-      if (storedRoom.playlist.length == 0 && (storedRoom.nowPlaying == undefined)) {
+      if (storedRoom.playlist.length == 0) {
         this.loadVideo(client, { ...payload, music });
-        console.log('after first load', storedRoom)
       } else {
         storedRoom.playlist.push({ ...music, url: payload.videourl });
       }
@@ -244,11 +253,8 @@ export class GatewayGateway {
     const storedRoom = this.store.find((room) => room.roomid == payload.roomid);
     if (storedRoom) {
       storedRoom.playing = payload.videourl;
-      storedRoom.musicowner = {
-        id: client.id,
-      };
       storedRoom.nowPlaying = {
-        currentTime: 0,
+        timecode: 0,
       };
 
       const index = storedRoom.playlist.findIndex(
@@ -288,29 +294,29 @@ export class GatewayGateway {
     return 'Hello world!';
   }
 
-  @SubscribeMessage('updateVideo')
-  updateVideo(client: Socket, payload: any): string {
-    if (payload.type !== 10) {
-      this.server.to(payload.roomid).emit('videoUpdated', {
-        type: payload.type,
-        currentTime: payload.currentTime,
-      });
-    } else {
-      const room = this._getStoredRoomRef(payload.roomid);
-      if (room.nowPlaying) {
-        room.nowPlaying.currentTime = payload.currentTime;
-      } else {
-        room.nowPlaying = {
-          currentTime: payload.currentTime,
-        };
-      }
-      this.server.to(payload.roomid).emit('videoUpdated', {
-        type: payload.type,
-        currentTime: payload.currentTime,
-      });
-    }
-    return 'Hello world!';
-  }
+  // @SubscribeMessage('updateVideo')
+  // updateVideo(client: Socket, payload: any): string {
+  //   if (payload.type !== 10) {
+  //     this.server.to(payload.roomid).emit('videoUpdated', {
+  //       type: payload.type,
+  //       currentTime: payload.currentTime,
+  //     });
+  //   } else {
+  //     const room = this._getStoredRoomRef(payload.roomid);
+  //     if (room.nowPlaying) {
+  //       room.nowPlaying.timecode = payload.currentTime;
+  //     } else {
+  //       room.nowPlaying = {
+  //         timecode: payload.currentTime,
+  //       };
+  //     }
+  //     this.server.to(payload.roomid).emit('videoUpdated', {
+  //       type: payload.type,
+  //       currentTime: payload.currentTime,
+  //     });
+  //   }
+  //   return 'Hello world!';
+  // }
 
   @SubscribeMessage('clearPlaylist')
   clearPlaylist(client: Socket, payload: any): any {
@@ -323,7 +329,6 @@ export class GatewayGateway {
   skipVideo(client: Socket, payload: any): any {
     const storedRoom = this._getStoredRoomRef(payload.roomid);
     if (storedRoom) {
-      console.log(payload, 'skipvideo');
       this.loadVideo(client, {
         roomid: payload.roomid,
         music: storedRoom.playlist[0],
