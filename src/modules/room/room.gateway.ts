@@ -237,12 +237,11 @@ export class GatewayGateway {
       const user = storedRoom.users.find((user) => user.id == client.id);
       const music = await getVideoDetails(payload.videoid, user);
       // eslint-disable-next-line prettier/prettier
-      if (storedRoom.playlist.length == 0) {
+      if (storedRoom.playlist.length == 0 && storedRoom.nowPlaying != undefined) {
         this.loadVideo(client, { ...payload, music });
       } else {
         storedRoom.playlist.push({ ...music, url: payload.videourl });
       }
-
       this.server.to(payload.roomid).emit('videoQueued', storedRoom.playlist);
     }
     return 'Hello world!';
